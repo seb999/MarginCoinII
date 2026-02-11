@@ -1,0 +1,52 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "type": "node-terminal",
+      "name": "Start Frontend",
+      "request": "launch",
+      "command": "npm run dev",
+      "cwd": "${workspaceFolder}",
+      "presentation": {
+        "group": "dev",
+        "order": 1
+      }
+    },
+    {
+      "type": "coreclr",
+      "name": "Start Backend (.NET)",
+      "request": "launch",
+      "preLaunchTask": "build-backend",
+      "program": "${workspaceFolder}/backend/bin/Debug/net8.0/MarginCoinAPI.dll",
+      "args": [],
+      "cwd": "${workspaceFolder}/backend",
+      "stopAtEntry": false,
+      "serverReadyAction": {
+        "action": "openExternally",
+        "pattern": "\\bNow listening on:\\s+(https?://\\S+)"
+      },
+      "env": {
+        "ASPNETCORE_ENVIRONMENT": "Development"
+      },
+      "sourceFileMap": {
+        "/Views": "${workspaceFolder}/Views"
+      },
+      "presentation": {
+        "group": "dev",
+        "order": 2
+      }
+    }
+  ],
+  "compounds": [
+    {
+      "name": "Start Full Application (F5)",
+      "configurations": ["Start Frontend", "Start Backend (.NET)"],
+      "presentation": {
+        "hidden": false,
+        "group": "dev",
+        "order": 1
+      },
+      "stopAll": true
+    }
+  ]
+}
