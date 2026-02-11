@@ -1,0 +1,6 @@
+@MarginCoinAPI_HostAddress = http://localhost:5017
+
+GET {{MarginCoinAPI_HostAddress}}/weatherforecast/
+Accept: application/json
+
+###

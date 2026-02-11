@@ -1,0 +1,53 @@
+<Project Sdk="Microsoft.NET.Sdk.Web">
+
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- API Documentation -->
+    <PackageReference Include="Microsoft.AspNetCore.OpenApi" Version="8.0.8" />
+    <PackageReference Include="Swashbuckle.AspNetCore" Version="6.4.0" />
+
+    <!-- Entity Framework Core for Database -->
+    <PackageReference Include="Microsoft.EntityFrameworkCore" Version="8.0.8" />
+    <PackageReference Include="Microsoft.EntityFrameworkCore.Design" Version="8.0.8">
+      <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+      <PrivateAssets>all</PrivateAssets>
+    </PackageReference>
+    <PackageReference Include="Microsoft.EntityFrameworkCore.Sqlite" Version="8.0.8" />
+    <PackageReference Include="Microsoft.EntityFrameworkCore.Tools" Version="8.0.8">
+      <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+      <PrivateAssets>all</PrivateAssets>
+    </PackageReference>
+
+    <!-- SignalR for Real-time Communication -->
+    <PackageReference Include="Microsoft.AspNetCore.SignalR" Version="1.1.0" />
+
+    <!-- Binance API Clients -->
+    <PackageReference Include="Binance.Net" Version="10.9.0" />
+    <PackageReference Include="Binance.Spot" Version="2.0.0" />
+
+    <!-- Machine Learning -->
+    <PackageReference Include="Microsoft.ML" Version="3.0.1" />
+    <PackageReference Include="Microsoft.ML.Vision" Version="3.0.1" />
+
+    <!-- Image Processing -->
+    <PackageReference Include="SixLabors.ImageSharp" Version="3.1.6" />
+
+    <!-- JSON Serialization (updated to match dependency requirements) -->
+    <PackageReference Include="System.Text.Json" Version="8.0.5" />
+
+    <!-- Technical Analysis Library -->
+    <PackageReference Include="Cryptowatcher.TA-LIb-Core" Version="1.0.0" />
+
+    <!-- Serilog for Logging -->
+    <PackageReference Include="Serilog.AspNetCore" Version="8.0.0" />
+    <PackageReference Include="Serilog.Sinks.Console" Version="5.0.1" />
+    <PackageReference Include="Serilog.Sinks.File" Version="5.0.0" />
+    <PackageReference Include="Serilog.Sinks.Seq" Version="7.0.0" />
+  </ItemGroup>
+
+</Project>
