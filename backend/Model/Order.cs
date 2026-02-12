@@ -24,6 +24,8 @@ namespace MarginCoinAPI.Model
         public double TakeProfit { get; set; }
         public double Profit { get; set; }
         public double Fee { get; set; }
+        public double BuyFee { get; set; }
+        public double SellFee { get; set; }
         public string? Type { get; set; }
         public double TrendScore { get; set; }
         public double AIScore { get; set; }

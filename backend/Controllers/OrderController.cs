@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.EntityFrameworkCore;
 using MarginCoinAPI.Model;
 using System.Globalization;
 using MarginCoinAPI.Class;
@@ -32,8 +33,8 @@ namespace MarginCoinAPI.Controllers
 
         [HttpGet("[action]")]
         public List<Order> GetAllCompletedOrder(){
-            //return _appDbContext.Order.Where(p=>p.IsClosed == 1).ToList();
-               return _appDbContext.Order.ToList();
+            // Use AsNoTracking() to ensure fresh data from database with no EF caching
+            return _appDbContext.Order.AsNoTracking().ToList();
         }
 
         [HttpGet("[action]")]

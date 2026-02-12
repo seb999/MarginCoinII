@@ -18,6 +18,8 @@ interface ChartModalProps {
   candleData: CandleData[];
   entryPrice?: number;
   exitPrice?: number;
+  entryTime?: string;
+  exitTime?: string;
 }
 
 export default function ChartModal({
@@ -26,7 +28,9 @@ export default function ChartModal({
   symbol,
   candleData,
   entryPrice,
-  exitPrice
+  exitPrice,
+  entryTime,
+  exitTime
 }: ChartModalProps) {
   return (
     <Dialog
@@ -81,6 +85,8 @@ export default function ChartModal({
           candleData={candleData}
           entryPrice={entryPrice}
           exitPrice={exitPrice}
+          entryTime={entryTime}
+          exitTime={exitTime}
           height={600}
         />
       </DialogContent>

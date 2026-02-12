@@ -1,7 +1,9 @@
 using System;
+using System.Globalization;
 using System.Linq;
 using System.Text.Json;
 using MarginCoinAPI.Configuration;
+using MarginCoinAPI.Model;
 using MarginCoinAPI.Service;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Options;
@@ -14,16 +16,25 @@ namespace MarginCoinAPI.Controllers
     {
         private readonly ITradingState _tradingState;
         private readonly ISymbolService _symbolService;
+        private readonly IBinanceService _binanceService;
         private readonly TradingConfiguration _tradingConfig;
+        private readonly ITradingSettingsService _settingsService;
+        private readonly ApplicationDbContext _appDbContext;
 
         public GlobalsController(
             ITradingState tradingState,
             ISymbolService symbolService,
-            IOptions<TradingConfiguration> tradingConfig)
+            IBinanceService binanceService,
+            IOptions<TradingConfiguration> tradingConfig,
+            ITradingSettingsService settingsService,
+            ApplicationDbContext appDbContext)
         {
             _tradingState = tradingState;
             _symbolService = symbolService;
+            _binanceService = binanceService;
             _tradingConfig = tradingConfig.Value;
+            _settingsService = settingsService;
+            _appDbContext = appDbContext;
         }
 
         [HttpGet("[action]")]
@@ -39,10 +50,22 @@ namespace MarginCoinAPI.Controllers
         }
 
         [HttpGet("[action]/{isProd}")]
-        public void SetServer(bool isProd)
+        public IActionResult SetServer(bool isProd)
         {
             _tradingState.IsProd = isProd;
             _tradingState.SymbolBaseList = _symbolService.GetTopSymbols(_tradingConfig.NumberOfSymbols);
+
+            if (isProd)
+            {
+                var account = _binanceService.Account();
+                if (account == null)
+                {
+                    _tradingState.IsProd = false;
+                    return BadRequest("Unable to connect to Binance Production. Check that your IP address is whitelisted in your Binance API key settings.");
+                }
+            }
+
+            return Ok();
         }
 
         [HttpGet("[action]/{isOpen}")]
@@ -56,6 +79,35 @@ namespace MarginCoinAPI.Controllers
 
         [HttpGet("[action]")]
         public string GetInterval() => JsonSerializer.Serialize(_tradingConfig.Interval);
+
+        [HttpGet("[action]")]
+        public IActionResult CheckBalance()
+        {
+            var account = _binanceService.Account();
+            if (account?.balances == null)
+                return BadRequest("Unable to retrieve account balance from Binance.");
+
+            var usdcBalance = account.balances.FirstOrDefault(b => b.asset == "USDC");
+            double availableBalance = 0;
+            if (usdcBalance != null)
+                double.TryParse(usdcBalance.free, NumberStyles.Any, CultureInfo.InvariantCulture, out availableBalance);
+
+            var runtime = _settingsService.GetRuntimeSettingsAsync().GetAwaiter().GetResult();
+            var activeOrders = _appDbContext.Order.Count(p => p.IsClosed == 0);
+            var remainingSlots = Math.Max(0, runtime.MaxOpenTrades - activeOrders);
+            var requiredBalance = remainingSlots * runtime.QuoteOrderQty;
+
+            return Ok(new
+            {
+                availableBalance,
+                requiredBalance,
+                activeOrders,
+                maxOpenTrades = runtime.MaxOpenTrades,
+                remainingSlots,
+                quoteOrderQty = runtime.QuoteOrderQty,
+                sufficient = availableBalance >= requiredBalance
+            });
+        }
 
         [HttpGet("[action]")]
         public object GetMemoryDiagnostics()

@@ -19,11 +19,14 @@ namespace MarginCoinAPI.Configuration
         public int ReplacementCooldownSeconds { get; set; } = 180;
         public int MaxReplacementsPerHour { get; set; } = 4;
         public int MaxCandidateDepth { get; set; } = 30;
+        public int MinPositionAgeForReplacementSeconds { get; set; } = 60;
 
         // Risk Management
         public double WeakTrendStopLossPercentage { get; set; } = 0.5;
         public bool EnableDynamicStopLoss { get; set; } = true;
         public double TrailingStopPercentage { get; set; } = 0.5;
+        // Trail arming buffer: percentage above entry before trailing/weak-trend logic activates
+        public double TrailArmBufferPercentage { get; set; } = 1.0;
 
         // AI/ML Features
         public bool EnableMLPredictions { get; set; } = false;

@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Threading;
 using MarginCoinAPI.Class;
 using MarginCoinAPI.Model;
 using Microsoft.Extensions.Logging;
@@ -22,6 +23,9 @@ namespace MarginCoinAPI.Service
         List<MarketStream> AllMarketData { get; set; }
         Dictionary<string, bool> OnHold { get; }
 
+        // Synchronization
+        SemaphoreSlim OrderCreationSemaphore { get; }
+
         // Flags
         bool IsProd { get; set; }
         bool IsTradingOpen { get; set; }
@@ -32,16 +36,23 @@ namespace MarginCoinAPI.Service
 
         // Methods
         void ClearCandleMatrix();
-        void CleanupOldData(int maxSymbols = 50, int maxCandlesPerSymbol = 500);
+        void CleanupOldData(int maxCandlesPerSymbol = 100);
         void CleanupStaleOnHold(HashSet<string> activeSymbols);
     }
 
     public class TradingStateService : ITradingState
     {
         private readonly object _candleLock = new object();
+        private readonly SemaphoreSlim _orderCreationSemaphore = new SemaphoreSlim(1, 1);
         private DateTime _lastCleanup = DateTime.UtcNow;
         private readonly TimeSpan _cleanupInterval = TimeSpan.FromMinutes(15);
         private readonly ILogger<TradingStateService> _logger;
+
+        /// <summary>
+        /// Semaphore for synchronizing order creation to prevent MaxOpenTrades race conditions.
+        /// Ensures only one order is created at a time across all threads.
+        /// </summary>
+        public SemaphoreSlim OrderCreationSemaphore => _orderCreationSemaphore;
 
         public TradingStateService(ILogger<TradingStateService> logger)
         {
@@ -78,7 +89,7 @@ namespace MarginCoinAPI.Service
             }
         }
 
-        public void CleanupOldData(int maxSymbols = 50, int maxCandlesPerSymbol = 500)
+        public void CleanupOldData(int maxCandlesPerSymbol = 100)
         {
             // Only cleanup every 15 minutes to avoid overhead
             if (DateTime.UtcNow - _lastCleanup < _cleanupInterval)
@@ -88,19 +99,13 @@ namespace MarginCoinAPI.Service
 
             lock (_candleLock)
             {
-                var candleMatrixRemoved = 0;
                 var candlesPerSymbolRemoved = 0;
                 var marketDataRemoved = 0;
                 var marketStreamRemoved = 0;
 
-                // Limit CandleMatrix size - keep only recent symbols
-                if (CandleMatrix.Count > maxSymbols)
-                {
-                    candleMatrixRemoved = CandleMatrix.Count - maxSymbols;
-                    CandleMatrix.RemoveRange(0, candleMatrixRemoved);
-                }
-
-                // Limit candles per symbol - keep only recent candles
+                // NEVER remove symbols from CandleMatrix - only trim old candles per symbol
+                // This ensures active positions are always monitored
+                // Keep last 100 candles per symbol (enough for all indicators: RSI=14, MACD=26, EMA=50)
                 foreach (var candles in CandleMatrix)
                 {
                     if (candles.Count > maxCandlesPerSymbol)
@@ -128,10 +133,10 @@ namespace MarginCoinAPI.Service
                 _lastCleanup = DateTime.UtcNow;
 
                 _logger.LogInformation(
-                    "Memory cleanup completed. CandleMatrix: {CandleMatrixCount} symbols ({Removed1} removed), " +
-                    "Total candles removed: {Removed2}, AllMarketData: {MarketDataCount} ({Removed3} removed), " +
-                    "MarketStreamOnSpot: {StreamCount} ({Removed4} removed), OnHold: {OnHoldCount}",
-                    CandleMatrix.Count, candleMatrixRemoved,
+                    "Memory cleanup completed. CandleMatrix: {CandleMatrixCount} symbols (kept all), " +
+                    "Old candles removed: {Removed1}, AllMarketData: {MarketDataCount} ({Removed2} removed), " +
+                    "MarketStreamOnSpot: {StreamCount} ({Removed3} removed), OnHold: {OnHoldCount}",
+                    CandleMatrix.Count,
                     candlesPerSymbolRemoved, AllMarketData.Count, marketDataRemoved,
                     MarketStreamOnSpot.Count, marketStreamRemoved, OnHold.Count);
             }

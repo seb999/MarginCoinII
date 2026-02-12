@@ -79,7 +79,8 @@ namespace MarginCoinAPI.Service
                 if (symbol != null)
                 {
                     symbol.Rank = coin.cmc_rank;
-                    symbol.Capitalisation = symbol.Capitalisation ?? -1;
+                    // Note: Capitalisation data is not available from API (quote field is commented out)
+                    // Only update rank, leave capitalisation unchanged
                     _dbContext.Symbol.Update(symbol);
                     _dbContext.SaveChanges();
                 }

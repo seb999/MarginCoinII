@@ -45,6 +45,7 @@ namespace MarginCoinAPI.Service
         public double? WeakTrendStopLossPercentage { get; set; }
         public bool? EnableDynamicStopLoss { get; set; }
         public double? TrailingStopPercentage { get; set; }
+        public double? TrailArmBufferPercentage { get; set; }
         public bool? EnableMLPredictions { get; set; }
         public bool? EnableOpenAISignals { get; set; }
     }
@@ -133,6 +134,8 @@ namespace MarginCoinAPI.Service
                 updates[nameof(RuntimeTradingSettings.EnableDynamicStopLoss)] = dto.EnableDynamicStopLoss.Value.ToString();
             if (dto.TrailingStopPercentage.HasValue)
                 updates[nameof(RuntimeTradingSettings.TrailingStopPercentage)] = dto.TrailingStopPercentage.Value.ToString(CultureInfo.InvariantCulture);
+            if (dto.TrailArmBufferPercentage.HasValue)
+                updates[nameof(RuntimeTradingSettings.TrailArmBufferPercentage)] = dto.TrailArmBufferPercentage.Value.ToString(CultureInfo.InvariantCulture);
             if (dto.EnableMLPredictions.HasValue)
                 updates[nameof(RuntimeTradingSettings.EnableMLPredictions)] = dto.EnableMLPredictions.Value.ToString();
             if (dto.EnableOpenAISignals.HasValue)
@@ -222,6 +225,9 @@ namespace MarginCoinAPI.Service
                     case nameof(RuntimeTradingSettings.TrailingStopPercentage):
                         runtime.TrailingStopPercentage = double.Parse(setting.Value, CultureInfo.InvariantCulture);
                         break;
+                    case nameof(RuntimeTradingSettings.TrailArmBufferPercentage):
+                        runtime.TrailArmBufferPercentage = double.Parse(setting.Value, CultureInfo.InvariantCulture);
+                        break;
                     case nameof(RuntimeTradingSettings.EnableMLPredictions):
                         runtime.EnableMLPredictions = bool.Parse(setting.Value);
                         break;
@@ -259,6 +265,7 @@ namespace MarginCoinAPI.Service
                         { nameof(RuntimeTradingSettings.WeakTrendStopLossPercentage), defaults.WeakTrendStopLossPercentage.ToString(CultureInfo.InvariantCulture) },
                         { nameof(RuntimeTradingSettings.EnableDynamicStopLoss), defaults.EnableDynamicStopLoss.ToString() },
                         { nameof(RuntimeTradingSettings.TrailingStopPercentage), defaults.TrailingStopPercentage.ToString(CultureInfo.InvariantCulture) },
+                        { nameof(RuntimeTradingSettings.TrailArmBufferPercentage), defaults.TrailArmBufferPercentage.ToString(CultureInfo.InvariantCulture) },
                         { nameof(RuntimeTradingSettings.EnableMLPredictions), defaults.EnableMLPredictions.ToString() },
                         { nameof(RuntimeTradingSettings.EnableOpenAISignals), defaults.EnableOpenAISignals.ToString() }
                     };

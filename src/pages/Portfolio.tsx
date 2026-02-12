@@ -2,8 +2,9 @@ import { Wallet, ArrowRightLeft, RefreshCw, BarChart2 } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { DataGrid, type GridColDef } from '@mui/x-data-grid';
 import { ThemeProvider, createTheme } from '@mui/material/styles';
-import { Alert, TextField, Button, Select, MenuItem, FormControl, InputLabel, Box, IconButton } from '@mui/material';
+import { Alert, TextField, Button, Select, MenuItem, FormControl, InputLabel, Box, IconButton, Switch, FormControlLabel } from '@mui/material';
 import ChartModal from '../components/ChartModal';
+import { orderService } from '../services/orderService';
 
 const darkTheme = createTheme({
   palette: {
@@ -28,6 +29,7 @@ interface Asset {
   locked: string;
   total: number;
   usdValue: number;
+  trendScore?: number;
 }
 
 export default function Portfolio() {
@@ -46,10 +48,33 @@ export default function Portfolio() {
   const [chartModalOpen, setChartModalOpen] = useState(false);
   const [chartSymbol, setChartSymbol] = useState('');
   const [chartData, setChartData] = useState<any[]>([]);
+  const [isProd, setIsProd] = useState(false);
 
   useEffect(() => {
     loadAssets();
+    loadServerMode();
   }, []);
+
+  const loadServerMode = async () => {
+    try {
+      const prod = await orderService.getServer();
+      setIsProd(prod);
+    } catch (err) {
+      console.error('Failed to load server mode:', err);
+    }
+  };
+
+  const toggleServerMode = async () => {
+    try {
+      const newMode = !isProd;
+      await orderService.setServer(newMode);
+      setIsProd(newMode);
+      await loadAssets();
+    } catch (err) {
+      console.error('Failed to toggle server mode:', err);
+      setError(err instanceof Error ? err.message : 'Failed to toggle server mode');
+    }
+  };
 
   const loadAssets = async () => {
     try {
@@ -76,6 +101,20 @@ export default function Portfolio() {
         priceMap.set(price.symbol, parseFloat(price.price));
       });
 
+      // Fetch trend scores
+      let trendScoresMap = new Map<string, number>();
+      try {
+        const trendScoresResponse = await fetch('/api/AlgoTrade/GetTrendScores');
+        if (trendScoresResponse.ok) {
+          const trendScoresData = await trendScoresResponse.json();
+          trendScoresData.forEach((score: any) => {
+            trendScoresMap.set(score.symbol, score.trendScore);
+          });
+        }
+      } catch (err) {
+        console.warn('Failed to fetch trend scores:', err);
+      }
+
       // Convert Binance account response to Asset format with USD values
       const formattedAssets = accountData.balances.map((balance: any) => {
         const total = parseFloat(balance.free) + parseFloat(balance.locked);
@@ -93,12 +132,18 @@ export default function Portfolio() {
           usdValue = total * price;
         }
 
+        // Get trend score for this asset
+        const usdcSymbol = `${balance.asset}USDC`;
+        const usdtSymbol = `${balance.asset}USDT`;
+        const trendScore = trendScoresMap.get(usdcSymbol) || trendScoresMap.get(usdtSymbol);
+
         return {
           asset: balance.asset,
           free: balance.free,
           locked: balance.locked,
           total: total,
           usdValue: usdValue,
+          trendScore: trendScore,
         };
       });
 
@@ -121,13 +166,23 @@ export default function Portfolio() {
       setSwapping(true);
       setError(null);
 
-      // Step 1: Sell the fromAsset to get toAsset (e.g., BTC -> USDC means sell BTCUSDC)
-      const symbol = `${fromAsset}${toAsset}`;
+      const quoteCurrencies = ['USDC', 'USDT'];
       const qty = parseFloat(amount);
 
-      const sellResponse = await fetch(`/api/Binance/Sell/${symbol}/${qty}`);
-      if (!sellResponse.ok) {
-        throw new Error(`Failed to sell ${fromAsset} for ${toAsset}`);
+      if (quoteCurrencies.includes(fromAsset)) {
+        // Buying: USDC -> BTC means buy on BTCUSDC pair with quoteOrderQty
+        const symbol = `${toAsset}${fromAsset}`;
+        const response = await fetch(`/api/Binance/Buy/${symbol}/${qty}`);
+        if (!response.ok) {
+          throw new Error(`Failed to buy ${toAsset} with ${fromAsset}`);
+        }
+      } else {
+        // Selling: BTC -> USDC means sell on BTCUSDC pair with quantity
+        const symbol = `${fromAsset}${toAsset}`;
+        const response = await fetch(`/api/Binance/Sell/${symbol}/${qty}`);
+        if (!response.ok) {
+          throw new Error(`Failed to sell ${fromAsset} for ${toAsset}`);
+        }
       }
 
       console.log('Swap completed successfully');
@@ -209,6 +264,17 @@ export default function Portfolio() {
       cellClassName: () => 'usd-value-cell',
     },
     {
+      field: 'trendScore',
+      headerName: 'TS',
+      width: 90,
+      type: 'number',
+      valueFormatter: (value: number | undefined) => value !== undefined ? value.toFixed(1) : 'N/A',
+      cellClassName: (params) => {
+        if (params.value === undefined || params.value === null) return '';
+        return params.value > 0 ? 'ts-positive' : params.value < 0 ? 'ts-negative' : '';
+      },
+    },
+    {
       field: 'chart',
       headerName: 'Chart',
       width: 80,
@@ -277,6 +343,38 @@ export default function Portfolio() {
                 ${totalUsdValue.toFixed(2)}
               </span>
             </Box>
+
+            <FormControlLabel
+              control={
+                <Switch
+                  checked={isProd}
+                  onChange={toggleServerMode}
+                  sx={{
+                    '& .MuiSwitch-switchBase.Mui-checked': {
+                      color: '#f6465d',
+                    },
+                    '& .MuiSwitch-switchBase.Mui-checked + .MuiSwitch-track': {
+                      backgroundColor: '#f6465d',
+                    },
+                    '& .MuiSwitch-switchBase': {
+                      color: '#0ecb81',
+                    },
+                    '& .MuiSwitch-track': {
+                      backgroundColor: '#0ecb81',
+                    },
+                  }}
+                />
+              }
+              label={isProd ? 'PROD' : 'TEST'}
+              sx={{
+                marginLeft: 'auto',
+                '& .MuiFormControlLabel-label': {
+                  color: isProd ? '#f6465d' : '#0ecb81',
+                  fontWeight: 'bold',
+                  fontSize: '14px',
+                },
+              }}
+            />
           </div>
 
           <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr', gap: '20px' }}>
@@ -323,6 +421,14 @@ export default function Portfolio() {
                   },
                   '& .usd-value-cell': {
                     color: '#f0b90b',
+                    fontWeight: 'bold',
+                  },
+                  '& .ts-positive': {
+                    color: '#0ecb81',
+                    fontWeight: 'bold',
+                  },
+                  '& .ts-negative': {
+                    color: '#f6465d',
                     fontWeight: 'bold',
                   },
                 }}

@@ -43,6 +43,7 @@ namespace MarginCoinAPI.Controllers
                         netProfit = 0.0,
                         bestTrade = 0.0,
                         worstTrade = 0.0,
+                        totalFees = 0.0,
                         trades = new object[0]
                     });
                 }
@@ -56,6 +57,7 @@ namespace MarginCoinAPI.Controllers
 
                 double bestTrade = completedTrades.Any() ? completedTrades.Max(t => t.Profit) : 0;
                 double worstTrade = completedTrades.Any() ? completedTrades.Min(t => t.Profit) : 0;
+                double totalFees = completedTrades.Sum(t => t.Fee);
 
                 // Get individual trades for chart (ordered by close date)
                 var trades = completedTrades
@@ -80,6 +82,7 @@ namespace MarginCoinAPI.Controllers
                     netProfit = netProfit,
                     bestTrade = bestTrade,
                     worstTrade = worstTrade,
+                    totalFees = totalFees,
                     trades = trades
                 };
 

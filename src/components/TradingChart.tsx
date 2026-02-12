@@ -18,7 +18,35 @@ interface TradingChartProps {
   candleData: CandleData[];
   entryPrice?: number;
   exitPrice?: number;
+  entryTime?: string;
+  exitTime?: string;
   height?: number | string;
+}
+
+// Parse date string "dd/MM/yyyy HH:mm:ss" to timestamp
+function parseDateToTimestamp(dateStr: string): number | null {
+  if (!dateStr) return null;
+  // Handle "dd/MM/yyyy HH:mm:ss" format
+  const [datePart, timePart] = dateStr.split(' ');
+  if (!datePart) return null;
+  const [day, month, year] = datePart.split('/');
+  const timeStr = timePart || '00:00:00';
+  const parsed = new Date(`${year}-${month}-${day}T${timeStr}`);
+  return isNaN(parsed.getTime()) ? null : parsed.getTime();
+}
+
+// Find the closest candle timestamp to a given target timestamp
+function findClosestCandle(ohlc: [number, number, number, number, number][], targetTime: number): number {
+  let closest = ohlc[0][0];
+  let minDiff = Math.abs(ohlc[0][0] - targetTime);
+  for (const candle of ohlc) {
+    const diff = Math.abs(candle[0] - targetTime);
+    if (diff < minDiff) {
+      minDiff = diff;
+      closest = candle[0];
+    }
+  }
+  return closest;
 }
 
 export default function TradingChart({
@@ -26,6 +54,8 @@ export default function TradingChart({
   candleData,
   entryPrice,
   exitPrice,
+  entryTime,
+  exitTime,
   height = 500
 }: TradingChartProps) {
   const chartRef = useRef<HighchartsReact.RefObject>(null);
@@ -61,6 +91,37 @@ export default function TradingChart({
     minTime: Math.min(...ohlc.map(c => c[0])),
     maxTime: Math.max(...ohlc.map(c => c[0]))
   });
+
+  // Create flag markers for trade open/close
+  const flagData: { x: number; title: string; text: string; color: string; fillColor: string }[] = [];
+
+  if (entryTime && entryPrice) {
+    const entryTs = parseDateToTimestamp(entryTime);
+    if (entryTs) {
+      const closestTs = findClosestCandle(ohlc, entryTs);
+      flagData.push({
+        x: closestTs,
+        title: 'BUY',
+        text: `Entry: ${entryPrice.toFixed(6)}`,
+        color: '#ffffff',
+        fillColor: '#0ecb81'
+      });
+    }
+  }
+
+  if (exitTime && exitPrice) {
+    const exitTs = parseDateToTimestamp(exitTime);
+    if (exitTs) {
+      const closestTs = findClosestCandle(ohlc, exitTs);
+      flagData.push({
+        x: closestTs,
+        title: 'SELL',
+        text: `Exit: ${exitPrice.toFixed(6)}`,
+        color: '#ffffff',
+        fillColor: '#f6465d'
+      });
+    }
+  }
 
   // Create plotLines for entry and exit
   const plotLines: Highcharts.YAxisPlotLinesOptions[] = [];
@@ -277,7 +338,24 @@ export default function TradingChart({
           signalPeriod: 9,
           period: 26
         }
-      } as any
+      } as any,
+      ...(flagData.length > 0 ? [{
+        type: 'flags',
+        data: flagData,
+        onSeries: 'price',
+        shape: 'flag',
+        width: 40,
+        y: -60,
+        style: {
+          fontSize: '11px',
+          fontWeight: 'bold'
+        },
+        states: {
+          hover: {
+            fillColor: '#f0b90b'
+          }
+        }
+      } as any] : [])
     ]
   };
 

@@ -72,6 +72,7 @@ builder.Services.AddDbContext<ApplicationDbContext>(options =>
 // Configure Settings
 builder.Services.Configure<BinanceConfiguration>(builder.Configuration.GetSection("Binance"));
 builder.Services.Configure<TradingConfiguration>(builder.Configuration.GetSection("Trading"));
+builder.Services.Configure<CoinMarketCapConfiguration>(builder.Configuration.GetSection("CoinMarketCap"));
 
 // Register Services
 builder.Services.AddSingleton<ITradingState, TradingStateService>();
@@ -100,7 +101,8 @@ builder.Services.AddCors(options =>
         {
             policy.WithOrigins("http://localhost:5173", "http://localhost:5174")
                   .AllowAnyHeader()
-                  .AllowAnyMethod();
+                  .AllowAnyMethod()
+                  .AllowCredentials(); // Required for SignalR
         });
 });
 

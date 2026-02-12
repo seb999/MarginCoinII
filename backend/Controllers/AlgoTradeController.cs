@@ -108,6 +108,12 @@ namespace MarginCoinAPI.Controllers
         #region HTTP API Endpoints
 
         [HttpGet("[action]")]
+        public void TestBinanceBuy()
+        {
+            _tradingState.TestBuyLimit = true;
+        }
+
+        [HttpGet("[action]")]
         public string MonitorMarket()
         {
             _logger.LogWarning("Start trading market with centralized candle collection...");
@@ -246,6 +252,43 @@ namespace MarginCoinAPI.Controllers
         public List<BinancePrice> GetSymbolPrice()
         {
             return _binanceService.GetSymbolPrice();
+        }
+
+        [HttpGet("[action]")]
+        public IActionResult GetTrendScores()
+        {
+            try
+            {
+                var trendScores = new List<object>();
+
+                lock (candleMatrixLock)
+                {
+                    foreach (var candles in _tradingState.CandleMatrix)
+                    {
+                        if (candles == null || candles.Count == 0) continue;
+
+                        var symbol = candles[0].s;
+                        var trendScore = TradeHelper.CalculateTrendScore(candles, _config.UseWeightedTrendScore);
+                        var lastPrice = candles[^1].c;
+                        var priceChange = candles[^1].P;
+
+                        trendScores.Add(new
+                        {
+                            symbol = symbol,
+                            trendScore = trendScore,
+                            lastPrice = lastPrice,
+                            priceChange = priceChange
+                        });
+                    }
+                }
+
+                return Ok(trendScores);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Failed to get trend scores");
+                return StatusCode(500, new { error = "Failed to get trend scores" });
+            }
         }
 
         /// <summary>
@@ -541,11 +584,11 @@ namespace MarginCoinAPI.Controllers
                          List<MarketStream> marketStreamList = Helper.deserializeHelper<List<MarketStream>>(fullData);
                          dataResult.Clear();  //we clean it immediately to avoid a bug on new data coming
 
-                        marketStreamList = marketStreamList.Where(p => p.s.Contains("USDC")).ToList();
+                         marketStreamList = marketStreamList.Where(p => p.s.Contains("USDC")).ToList();
 
                          TradeHelper.BufferMarketStream(marketStreamList, ref _marketStreamBuffer);
 
-                        _marketUpCount = _marketStreamBuffer.Count(pred => pred.P >= 0);
+                         _marketUpCount = _marketStreamBuffer.Count(pred => pred.P >= 0);
 
                          // Store all market data for later use with active orders
                          _tradingState.AllMarketData = [.. _marketStreamBuffer];
@@ -556,7 +599,7 @@ namespace MarginCoinAPI.Controllers
 
                          _tradingState.MarketStreamOnSpot = _marketStreamOnSpot;
 
-                         
+
 
                          if (_tradingState.IsTradingOpen)
                          {
@@ -959,7 +1002,7 @@ namespace MarginCoinAPI.Controllers
                 }
                 finally
                 {
-                    
+
                 }
             }
         }
@@ -973,17 +1016,28 @@ namespace MarginCoinAPI.Controllers
                 return;
             }
 
-            var activeOrders = orderService.GetActiveOrder();
-            var activeOrder = activeOrders.FirstOrDefault(p => p.Symbol == marketData.s);
-            var activeOrderCount = activeOrders.Count;
+            // Check OnHold FIRST to prevent race conditions
+            if (_tradingState.OnHold.TryGetValue(marketData.s, out var isOnHold) && isOnHold)
+            {
+                return; // Symbol already being processed
+            }
 
-            if (activeOrder == null && activeOrderCount < runtime.MaxOpenTrades)
+            // CRITICAL: Use semaphore to prevent MaxOpenTrades race conditions
+            // Only one thread can create an order at a time
+            await _tradingState.OrderCreationSemaphore.WaitAsync();
+            try
+            {
+                // Re-check active orders inside lock to get latest count
+                var activeOrders = orderService.GetActiveOrder();
+                var activeOrder = activeOrders.FirstOrDefault(p => p.Symbol == marketData.s);
+                var activeOrderCount = activeOrders.Count;
+
+                if (activeOrder == null && activeOrderCount < runtime.MaxOpenTrades)
             {
                 var entryDecision = await EnterLongPosition(marketData, symbolCandleList, runtime);
                 if (entryDecision.ShouldEnter)
                 {
-                    _tradingState.OnHold.TryAdd(marketData.s, true);
-
+                    // Note: OnHold is now set atomically inside BuyMarket/BuyLimit methods to prevent race conditions
                     Console.WriteLine($"Opening trade on {marketData.s}");
 
                     // Get LSTM AI prediction safely - defaults to empty if not available
@@ -1047,6 +1101,11 @@ namespace MarginCoinAPI.Controllers
                     await orderService.BuyLimit(marketData, symbolCandleList, aiScore, aiPrediction);
                 }
             }
+            }
+            finally
+            {
+                _tradingState.OrderCreationSemaphore.Release();
+            }
         }
 
         private async Task TryAggressiveReplacement(List<MarketStream> marketStreamList, IOrderService orderService, List<Order> activeOrders, RuntimeTradingSettings runtime)
@@ -1062,7 +1121,7 @@ namespace MarginCoinAPI.Controllers
                 return;
             }
 
-            var weakestOpenOrder = GetWeakestOpenOrder(marketStreamList, activeOrders);
+            var weakestOpenOrder = GetWeakestOpenOrder(marketStreamList, activeOrders, runtime);
             if (weakestOpenOrder == null)
             {
                 return;
@@ -1097,11 +1156,7 @@ namespace MarginCoinAPI.Controllers
                     await orderService.SellLimit(weakestOpenOrder.Value.Order, weakestOpenOrder.Value.MarketData, "replacement", exitAi.Score, exitAi.Prediction);
                 }
 
-                if (!_tradingState.OnHold.ContainsKey(bestCandidate.Value.Symbol))
-                {
-                    _tradingState.OnHold[bestCandidate.Value.Symbol] = true;
-                }
-
+                // Note: OnHold is now set inside BuyMarket/BuyLimit methods to prevent race conditions
                 if (_tradingState.IsMarketOrder)
                 {
                     await orderService.BuyMarket(bestCandidate.Value.MarketData, bestCandidate.Value.Candles, bestCandidate.Value.AiScore, bestCandidate.Value.AiPrediction);
@@ -1164,7 +1219,7 @@ namespace MarginCoinAPI.Controllers
             return candidates.OrderByDescending(c => c.Score).First();
         }
 
-        private (Order Order, double KeepScore, MarketStream MarketData, List<Candle> Candles)? GetWeakestOpenOrder(List<MarketStream> marketStreamList, List<Order> activeOrders)
+        private (Order Order, double KeepScore, MarketStream MarketData, List<Candle> Candles)? GetWeakestOpenOrder(List<MarketStream> marketStreamList, List<Order> activeOrders, RuntimeTradingSettings runtime)
         {
             (Order Order, double KeepScore, MarketStream MarketData, List<Candle> Candles)? weakest = null;
 
@@ -1172,6 +1227,18 @@ namespace MarginCoinAPI.Controllers
             {
                 foreach (var order in activeOrders)
                 {
+                    // Skip orders that were opened very recently to prevent rapid replacement of replacement orders
+                    if (DateTime.TryParseExact(order.OpenDate, "dd/MM/yyyy HH:mm:ss", CultureInfo.InvariantCulture, DateTimeStyles.None, out var openDt))
+                    {
+                        var secondsInPosition = DateTime.Now.Subtract(openDt).TotalSeconds;
+                        if (secondsInPosition < runtime.MinPositionAgeForReplacementSeconds)
+                        {
+                            _logger.LogDebug("Skipping {Symbol} from replacement consideration - only {Seconds}s old (min required: {MinAge}s)",
+                                order.Symbol, secondsInPosition, runtime.MinPositionAgeForReplacementSeconds);
+                            continue;
+                        }
+                    }
+
                     var candles = _tradingState.CandleMatrix.FirstOrDefault(c => c.Count > 0 && c.Last().s == order.Symbol);
                     if (candles == null || candles.Count == 0)
                         continue;
@@ -1436,6 +1503,9 @@ namespace MarginCoinAPI.Controllers
                 currentCandle = symbolCandleList?.Last();
                 lastPrice = currentCandle?.c;
                 highPrice = currentCandle?.h;
+                var isTrailArmed = activeOrder != null
+                                   && activeOrder.OpenPrice > 0
+                                   && activeOrder.HighPrice >= activeOrder.OpenPrice * (1 + runtime.TrailArmBufferPercentage / 100);
 
                 if (activeOrder == null || currentCandle == null || symbolCandleList == null)
                     return;
@@ -1444,6 +1514,21 @@ namespace MarginCoinAPI.Controllers
                 if (!string.Equals(activeOrder.Status, "FILLED", StringComparison.OrdinalIgnoreCase))
                 {
                     return;
+                }
+
+                // Grace period: Skip stop loss check for 2 minutes after order is filled
+                // This prevents premature stop-outs due to normal market volatility immediately after entry
+                bool isInGracePeriod = false;
+                if (!string.IsNullOrEmpty(activeOrder.OpenDate))
+                {
+                    TimeSpan timeSinceFill = DateTime.Now.Subtract(DateTime.ParseExact(activeOrder.OpenDate, "dd/MM/yyyy HH:mm:ss", CultureInfo.InvariantCulture));
+                    isInGracePeriod = timeSinceFill.TotalMinutes < 2;
+
+                    if (isInGracePeriod)
+                    {
+                        _logger.LogDebug("Order {OrderId} ({Symbol}) in grace period: {Elapsed:F1} min since fill, stop loss check skipped",
+                            activeOrder.Id, symbol, timeSinceFill.TotalMinutes);
+                    }
                 }
 
                 // TREND SCORE EXIT - Check for strong trend reversal
@@ -1456,6 +1541,7 @@ namespace MarginCoinAPI.Controllers
                 // Only applies to trades that haven't reached meaningful profit yet (< 1% gain)
                 // For profitable trades, the trailing stop loss handles protection
                 else if (runtime.EnableDynamicStopLoss &&
+                         isTrailArmed &&
                          trendScore <= 0 &&
                          trendScore > _config.TrendScoreExitThreshold &&
                          lastPrice.Value < activeOrder.OpenPrice * 1.01)
@@ -1489,14 +1575,18 @@ namespace MarginCoinAPI.Controllers
                     }
                 }
 
-                // Check stop loss
-                if (sellReason == null && lastPrice < activeOrder.StopLose)
+                // Check stop loss (skip during grace period to avoid premature stop-outs)
+                if (sellReason == null && !isInGracePeriod && lastPrice < activeOrder.StopLose)
                 {
                     sellReason = "stop loss triggered";
                 }
 
                 // Take profit
-                if (sellReason == null && lastPrice <= activeOrder.TakeProfit && lastPrice > activeOrder.OpenPrice)
+                if (sellReason == null &&
+                    isTrailArmed &&
+                    !isInGracePeriod &&
+                    lastPrice <= activeOrder.TakeProfit &&
+                    lastPrice > activeOrder.OpenPrice)
                 {
                     sellReason = $"take profit (price: {lastPrice:F2} <= target: {activeOrder.TakeProfit:F2})";
                 }
@@ -1505,10 +1595,10 @@ namespace MarginCoinAPI.Controllers
                 if (sellReason == null)
                 {
                     var mlPrediction = _mlService.MLPredList.FirstOrDefault(p => p.Symbol == activeOrder.Symbol);
-                if (mlPrediction != null && mlPrediction.PredictedLabel == PredictionDownLabel && mlPrediction.Score[0] >= 0.97)
-                {
-                    sellReason = $"AI exit signal (DOWN with {mlPrediction.Score[0] * 100:F1}% confidence)";
-                }
+                    if (mlPrediction != null && mlPrediction.PredictedLabel == PredictionDownLabel && mlPrediction.Score[0] >= 0.97)
+                    {
+                        sellReason = $"AI exit signal (DOWN with {mlPrediction.Score[0] * 100:F1}% confidence)";
+                    }
                 }
 
                 // Update order data if not selling
@@ -1680,15 +1770,6 @@ namespace MarginCoinAPI.Controllers
             await _hub.Clients.All.SendAsync("refreshUI");
         }
 
-        #endregion
-
-        #region Debug
-
-        [HttpGet("[action]")]
-        public void TestBinanceBuy()
-        {
-            _tradingState.TestBuyLimit = true;
-        }
         #endregion
     }
 }

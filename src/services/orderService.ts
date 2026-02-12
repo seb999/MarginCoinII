@@ -87,5 +87,61 @@ export const orderService = {
       throw new Error('Failed to get trading status');
     }
     return response.json();
+  },
+
+  async testBinanceBuy(): Promise<void> {
+    const response = await fetch('/api/AlgoTrade/TestBinanceBuy');
+    if (!response.ok) {
+      throw new Error('Failed to execute test buy');
+    }
+  },
+
+  async syncBinanceSymbol(): Promise<void> {
+    const response = await fetch('/api/AlgoTrade/SyncBinanceSymbol');
+    if (!response.ok) {
+      throw new Error('Failed to sync Binance symbols');
+    }
+  },
+
+  async closeOrder(orderId: number, lastPrice: number): Promise<void> {
+    const response = await fetch(`/api/AlgoTrade/CloseTrade/${orderId}/${lastPrice}`);
+    if (!response.ok) {
+      throw new Error('Failed to close order');
+    }
+  },
+
+  async getServer(): Promise<boolean> {
+    const response = await fetch('/api/Globals/GetServer');
+    if (!response.ok) {
+      throw new Error('Failed to get server mode');
+    }
+    return response.json();
+  },
+
+  async setServer(isProd: boolean): Promise<void> {
+    const response = await fetch(`/api/Globals/SetServer/${isProd}`);
+    if (!response.ok) {
+      const message = await response.text();
+      throw new Error(message || 'Failed to set server mode');
+    }
+  },
+
+  async checkBalance(): Promise<BalanceCheck> {
+    const response = await fetch('/api/Globals/CheckBalance');
+    if (!response.ok) {
+      const message = await response.text();
+      throw new Error(message || 'Failed to check balance');
+    }
+    return response.json();
   }
 };
+
+export interface BalanceCheck {
+  availableBalance: number;
+  requiredBalance: number;
+  activeOrders: number;
+  maxOpenTrades: number;
+  remainingSlots: number;
+  quoteOrderQty: number;
+  sufficient: boolean;
+}

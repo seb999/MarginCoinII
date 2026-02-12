@@ -13,6 +13,22 @@ export interface CandleUpdate {
   change: number;
 }
 
+export interface Candle {
+  id?: string;
+  T: number;   // Open time
+  s: string;   // Symbol
+  o: number;   // Open price
+  h: number;   // High price
+  l: number;   // Low price
+  c: number;   // Close price
+  v: number;   // Volume
+  t: number;   // Close time
+  x: boolean;  // Is candle closed
+  P?: number;  // Price change percent
+  Rsi?: number;
+  Macd?: number;
+}
+
 export interface TradingData {
   [key: string]: any;
 }

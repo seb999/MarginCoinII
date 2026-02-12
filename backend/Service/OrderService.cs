@@ -145,6 +145,8 @@ namespace MarginCoinAPI.Service
         try
         {
             var lastCandle = symbolCandles.Last();
+            var runtime = GetRuntimeSettings();
+            var armThreshold = dbOrder.OpenPrice * (1 + runtime.TrailArmBufferPercentage / 100);
 
             // Always update close price
             dbOrder.ClosePrice = lastCandle.c;
@@ -156,9 +158,13 @@ namespace MarginCoinAPI.Service
             if (currentHigh > dbOrder.HighPrice)
             {
                 dbOrder.HighPrice = currentHigh;
-                dbOrder.TakeProfit = currentHigh * (1 - (takeProfitPercentage / 100));
-                _logger.LogDebug("Updated HighPrice to {High} and TakeProfit to {TP} for {Symbol}",
-                    currentHigh, dbOrder.TakeProfit, dbOrder.Symbol);
+                var isTrailArmed = dbOrder.HighPrice >= armThreshold;
+                if (isTrailArmed)
+                {
+                    dbOrder.TakeProfit = dbOrder.HighPrice * (1 - (takeProfitPercentage / 100));
+                    _logger.LogDebug("Updated HighPrice to {High} and TakeProfit to {TP} for {Symbol} (trail armed at {Arm:F4})",
+                        currentHigh, dbOrder.TakeProfit, dbOrder.Symbol, armThreshold);
+                }
             }
 
             // Update LowPrice
@@ -190,6 +196,12 @@ namespace MarginCoinAPI.Service
 
             // Calculate the current market price
             Candle lastCandle = symbolCandles.Select(p => p).LastOrDefault();
+            var armThreshold = dbOrder.OpenPrice * (1 + runtime.TrailArmBufferPercentage / 100);
+            var isTrailArmed = dbOrder.HighPrice >= armThreshold;
+            if (!isTrailArmed)
+            {
+                return; // keep initial hard stop until profit buffer is reached
+            }
 
             // Trailing stop loss: continuously adjust stop loss based on highest price reached
             // The stop loss trails below the high price by the TrailingStopPercentage
@@ -256,7 +268,8 @@ namespace MarginCoinAPI.Service
             QuantityBuy = Helper.ToDouble(binanceOrder.executedQty),
             QuantitySell = 0,
             IsClosed = 0,
-            Fee = _tradingState.IsProd ? binanceOrder.fills.Sum(p => Helper.ToDouble(p.commission)) : Math.Round((TradeHelper.CalculateAvragePrice(binanceOrder) * Helper.ToDouble(binanceOrder.executedQty)) / 100) * 0.1,
+            BuyFee = _tradingState.IsProd && binanceOrder.fills != null ? binanceOrder.fills.Sum(p => Helper.ToDouble(p.commission)) : Math.Round((TradeHelper.CalculateAvragePrice(binanceOrder) * Helper.ToDouble(binanceOrder.executedQty)) / 100) * 0.1,
+            Fee = 0,
             Symbol = binanceOrder.symbol,
             ATR = symbolCandle.Last().ATR,
             RSI = symbolCandle.Last().Rsi,
@@ -289,6 +302,9 @@ namespace MarginCoinAPI.Service
         dbOrder.Side = binanceOrder.side;
         dbOrder.ClosePrice = TradeHelper.CalculateAvragePrice(binanceOrder);
         dbOrder.QuantitySell = Helper.ToDouble(binanceOrder.executedQty);
+        dbOrder.SellFee = _tradingState.IsProd && binanceOrder.fills != null
+            ? binanceOrder.fills.Sum(p => Helper.ToDouble(p.commission))
+            : Math.Round((TradeHelper.CalculateAvragePrice(binanceOrder) * Helper.ToDouble(binanceOrder.executedQty)) / 100) * 0.1;
         if (closeType != "") dbOrder.Type = closeType;
 
         _appDbContext.Order.Update(dbOrder);
@@ -302,6 +318,9 @@ namespace MarginCoinAPI.Service
             dbOrder.Status = binanceOrder.status;
             dbOrder.ClosePrice = TradeHelper.CalculateAvragePrice(binanceOrder);
             dbOrder.QuantitySell = Helper.ToDouble(binanceOrder.executedQty);
+            dbOrder.SellFee = _tradingState.IsProd && binanceOrder.fills != null
+                ? binanceOrder.fills.Sum(p => Helper.ToDouble(p.commission))
+                : Math.Round((TradeHelper.CalculateAvragePrice(binanceOrder) * Helper.ToDouble(binanceOrder.executedQty)) / 100) * 0.1;
             if (closeType != "") dbOrder.Type = closeType;
 
             _appDbContext.Order.Update(dbOrder);
@@ -364,7 +383,8 @@ namespace MarginCoinAPI.Service
         dbOrder.Status = binanceOrder.status;
         dbOrder.ClosePrice = TradeHelper.CalculateAvragePrice(binanceOrder);
         dbOrder.QuantitySell = Helper.ToDouble(binanceOrder.executedQty);
-        dbOrder.Profit = Math.Round((dbOrder.ClosePrice - dbOrder.OpenPrice) * dbOrder.QuantitySell);
+        dbOrder.Fee = dbOrder.BuyFee + dbOrder.SellFee;
+        dbOrder.Profit = Math.Round((dbOrder.ClosePrice - dbOrder.OpenPrice) * dbOrder.QuantitySell, 2);
         dbOrder.IsClosed = 1;
         dbOrder.CloseDate = DateTime.Now.ToString("dd/MM/yyyy HH:mm:ss");
 
@@ -383,6 +403,14 @@ namespace MarginCoinAPI.Service
     public async Task BuyLimit(MarketStream symbolSpot, List<Candle> symbolCandleList, double aiScore = 0, string aiPrediction = "",
         string openAISignal = null, double openAIScore = 0, double openAIConfidence = 0, string openAIRiskLevel = null, string openAIReasoning = null)
     {
+        // CRITICAL: Atomically check-and-set OnHold to prevent race conditions
+        // TryAdd returns false if key already exists, preventing duplicate orders
+        if (!_tradingState.OnHold.TryAdd(symbolSpot.s, true))
+        {
+            _logger.LogWarning("BuyLimit blocked for {Symbol} - already OnHold (race condition prevented)", symbolSpot.s);
+            return;
+        }
+
         var runtime = GetRuntimeSettings();
         // Check available USDC balance before placing order
         var availableBalance = GetAvailableUSDCBalance();
@@ -390,6 +418,12 @@ namespace MarginCoinAPI.Service
         {
             _logger.LogWarning("Insufficient USDC balance for {Symbol}. Required: {Required} USDC, Available: {Available} USDC. Skipping trade.",
                 symbolSpot.s, runtime.QuoteOrderQty, availableBalance);
+            _hub.Clients.All.SendAsync("insufficientBalance", JsonSerializer.Serialize(new
+            {
+                symbol = symbolSpot.s,
+                required = runtime.QuoteOrderQty,
+                available = availableBalance
+            }));
             _tradingState.OnHold.Remove(symbolSpot.s);
             return;
         }
@@ -408,9 +442,11 @@ namespace MarginCoinAPI.Service
         SaveBuyOrderDb(symbolSpot, symbolCandleList, myBinanceOrder, aiScore, aiPrediction,
             openAISignal, openAIScore, openAIConfidence, openAIRiskLevel, openAIReasoning);
 
-        await Task.Delay(300);
         myBinanceOrder.price = TradeHelper.CalculateAvragePrice(myBinanceOrder).ToString();
         await _hub.Clients.All.SendAsync("newPendingOrder", JsonSerializer.Serialize(myBinanceOrder));
+
+        // Delay to ensure SQLite transaction is fully committed before refreshUI
+        await Task.Delay(800);
         await _hub.Clients.All.SendAsync("refreshUI");
     }
 
@@ -458,14 +494,28 @@ namespace MarginCoinAPI.Service
         if (myBinanceOrder.status == "FILLED")
             CloseOrderDb(dbOrder, myBinanceOrder, exitAiScore, exitAiPrediction);
 
-        await Task.Delay(300);
         myBinanceOrder.price = TradeHelper.CalculateAvragePrice(myBinanceOrder).ToString();
         await _hub.Clients.All.SendAsync("sellOrderFilled", JsonSerializer.Serialize(myBinanceOrder));
+
+        // Delay to ensure SQLite transaction is fully committed before refreshUI
+        if (myBinanceOrder.status == "FILLED")
+        {
+            await Task.Delay(800);
+            await _hub.Clients.All.SendAsync("refreshUI");
+        }
     }
 
     public async Task BuyMarket(MarketStream symbolSpot, List<Candle> symbolCandleList, double aiScore = 0, string aiPrediction = "",
         string openAISignal = null, double openAIScore = 0, double openAIConfidence = 0, string openAIRiskLevel = null, string openAIReasoning = null)
     {
+        // CRITICAL: Atomically check-and-set OnHold to prevent race conditions
+        // TryAdd returns false if key already exists, preventing duplicate orders
+        if (!_tradingState.OnHold.TryAdd(symbolSpot.s, true))
+        {
+            _logger.LogWarning("BuyMarket blocked for {Symbol} - already OnHold (race condition prevented)", symbolSpot.s);
+            return;
+        }
+
         var runtime = GetRuntimeSettings();
         // Check available USDC balance before placing order
         var availableBalance = GetAvailableUSDCBalance();
@@ -473,6 +523,12 @@ namespace MarginCoinAPI.Service
         {
             _logger.LogWarning("Insufficient USDC balance for {Symbol}. Required: {Required} USDC, Available: {Available} USDC. Skipping trade.",
                 symbolSpot.s, runtime.QuoteOrderQty, availableBalance);
+            _hub.Clients.All.SendAsync("insufficientBalance", JsonSerializer.Serialize(new
+            {
+                symbol = symbolSpot.s,
+                required = runtime.QuoteOrderQty,
+                available = availableBalance
+            }));
             _tradingState.OnHold.Remove(symbolSpot.s);
             return;
         }
@@ -507,7 +563,9 @@ namespace MarginCoinAPI.Service
             _tradingState.OnHold.Remove(symbolSpot.s);
             myBinanceOrder.price = TradeHelper.CalculateAvragePrice(myBinanceOrder).ToString();
             await _hub.Clients.All.SendAsync("newPendingOrder", JsonSerializer.Serialize(myBinanceOrder));
-            await Task.Delay(500);
+
+            // Delay to ensure SQLite transaction is fully committed before refreshUI
+            await Task.Delay(800);
             await _hub.Clients.All.SendAsync("refreshUI");
         }
     }
@@ -559,8 +617,12 @@ namespace MarginCoinAPI.Service
         {
             SaveSellOrderDb(dbOrder, myBinanceOrder, closeType);
             CloseOrderDb(dbOrder, myBinanceOrder, exitAiScore, exitAiPrediction);
-            await Task.Delay(500);
+
             await _hub.Clients.All.SendAsync("sellOrderFilled", JsonSerializer.Serialize(myBinanceOrder));
+
+            // Delay to ensure SQLite transaction is fully committed before refreshUI
+            await Task.Delay(800);
+            await _hub.Clients.All.SendAsync("refreshUI");
         }
     }
 

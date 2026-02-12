@@ -372,7 +372,7 @@ namespace MarginCoinAPI.Service
             {
                 secretKey = _binanceConfig.Production.SecretKey;
                 publicKey = _binanceConfig.Production.PublicKey;
-                host = "https://api3.binance.com";
+                host = "https://api.binance.com";
             }
             else
             {
