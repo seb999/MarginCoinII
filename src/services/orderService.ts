@@ -43,7 +43,7 @@ export interface Order {
 
 export const orderService = {
   async getAllOrders(): Promise<Order[]> {
-    const response = await fetch('/api/Order/GetAllCompletedOrder');
+    const response = await fetch('/api/OrderQuery/GetAllCompletedOrder');
     if (!response.ok) {
       throw new Error('Failed to fetch orders');
     }
@@ -51,7 +51,7 @@ export const orderService = {
   },
 
   async getOpenOrder(symbol: string): Promise<Order[]> {
-    const response = await fetch(`/api/Order/GetOpenOrder/${symbol}`);
+    const response = await fetch(`/api/OrderQuery/GetOpenOrder/${symbol}`);
     if (!response.ok) {
       throw new Error('Failed to fetch open orders');
     }
@@ -59,7 +59,7 @@ export const orderService = {
   },
 
   async getPendingOrders(): Promise<Order[]> {
-    const response = await fetch('/api/Order/GetPendingdOrder');
+    const response = await fetch('/api/OrderQuery/GetPendingdOrder');
     if (!response.ok) {
       throw new Error('Failed to fetch pending orders');
     }
@@ -75,14 +75,14 @@ export const orderService = {
   },
 
   async setTradingState(isOpen: boolean): Promise<void> {
-    const response = await fetch(`/api/Globals/SetTradeParameter/${isOpen}`);
+    const response = await fetch(`/api/TradingConfig/SetTradeParameter/${isOpen}`);
     if (!response.ok) {
       throw new Error('Failed to set trading state');
     }
   },
 
   async getTradingStatus(): Promise<boolean> {
-    const response = await fetch('/api/Globals/GetTradingStatus');
+    const response = await fetch('/api/TradingConfig/GetTradingStatus');
     if (!response.ok) {
       throw new Error('Failed to get trading status');
     }
@@ -111,7 +111,7 @@ export const orderService = {
   },
 
   async getServer(): Promise<boolean> {
-    const response = await fetch('/api/Globals/GetServer');
+    const response = await fetch('/api/TradingConfig/GetServer');
     if (!response.ok) {
       throw new Error('Failed to get server mode');
     }
@@ -119,7 +119,7 @@ export const orderService = {
   },
 
   async setServer(isProd: boolean): Promise<void> {
-    const response = await fetch(`/api/Globals/SetServer/${isProd}`);
+    const response = await fetch(`/api/TradingConfig/SetServer/${isProd}`);
     if (!response.ok) {
       const message = await response.text();
       throw new Error(message || 'Failed to set server mode');
@@ -127,7 +127,7 @@ export const orderService = {
   },
 
   async checkBalance(): Promise<BalanceCheck> {
-    const response = await fetch('/api/Globals/CheckBalance');
+    const response = await fetch('/api/TradingConfig/CheckBalance');
     if (!response.ok) {
       const message = await response.text();
       throw new Error(message || 'Failed to check balance');

@@ -12,7 +12,7 @@ namespace MarginCoinAPI.Controllers
 {
     [ApiController]
     [Route("api/[controller]")]
-    public class GlobalsController : ControllerBase
+    public class TradingConfigController : ControllerBase
     {
         private readonly ITradingState _tradingState;
         private readonly ISymbolService _symbolService;
@@ -21,7 +21,7 @@ namespace MarginCoinAPI.Controllers
         private readonly ITradingSettingsService _settingsService;
         private readonly ApplicationDbContext _appDbContext;
 
-        public GlobalsController(
+        public TradingConfigController(
             ITradingState tradingState,
             ISymbolService symbolService,
             IBinanceService binanceService,

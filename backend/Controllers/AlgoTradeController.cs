@@ -292,6 +292,61 @@ namespace MarginCoinAPI.Controllers
         }
 
         /// <summary>
+        /// Get surge scores for all symbols - used for aggressive replacement strategy
+        /// </summary>
+        [HttpGet("[action]")]
+        public IEnumerable<object> SurgeScores()
+        {
+            var scores = new Dictionary<string, double>();
+            var matrix = _tradingState.CandleMatrix ?? new List<List<Candle>>();
+            var market = _tradingState.AllMarketData ?? new List<MarketStream>();
+
+            foreach (var candleList in matrix)
+            {
+                var last = candleList?.LastOrDefault();
+                if (last == null || string.IsNullOrEmpty(last.s)) continue;
+
+                var marketData = market.FirstOrDefault(m => m.s == last.s);
+                if (marketData == null) continue;
+
+                var score = CalculateSurgeScore(marketData, candleList.ToList());
+
+                // Skip invalid scores (NegativeInfinity, PositiveInfinity, NaN)
+                if (double.IsInfinity(score) || double.IsNaN(score)) continue;
+
+                var baseSymbol = last.s.Replace("USDC", "").Replace("USDT", "");
+                scores[baseSymbol] = score;
+                scores[last.s] = score;
+            }
+
+            return scores.Select(kv => new
+            {
+                symbol = kv.Key.Replace("USDC", "").Replace("USDT", ""),
+                pair = kv.Key,
+                score = kv.Value
+            });
+        }
+
+        /// <summary>
+        /// Get MACD slope for a specific symbol
+        /// </summary>
+        [HttpGet("[action]/{symbol}")]
+        public MacdSlope MacdSlope(string symbol)
+        {
+            var candleSymbol = _tradingState.CandleMatrix
+                .FirstOrDefault(p => p.LastOrDefault()?.s == symbol);
+
+            if (candleSymbol == null) return null;
+            return TradeHelper.CalculateMacdSlope(candleSymbol.ToList(), _config.Interval);
+        }
+
+        /// <summary>
+        /// Get list of symbols being traded
+        /// </summary>
+        [HttpGet("[action]")]
+        public List<Symbol> GetSymbolList() => _symbolService.GetTopSymbols(_config.NumberOfSymbols);
+
+        /// <summary>
         /// Initialize historical candle data for all trading symbols
         /// Fetches last 100 candles from Binance and saves to database
         /// </summary>

@@ -12,11 +12,11 @@ namespace MarginCoinAPI.Controllers
 {
     [ApiController]
     [Route("api/[controller]")]
-    public class OrderController : ControllerBase
+    public class OrderQueryController : ControllerBase
     {
         private readonly ApplicationDbContext _appDbContext;
 
-        public OrderController([FromServices] ApplicationDbContext appDbContext)
+        public OrderQueryController([FromServices] ApplicationDbContext appDbContext)
         {
             _appDbContext = appDbContext;
         }
